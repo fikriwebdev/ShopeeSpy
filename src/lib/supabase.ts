@@ -1,7 +1,7 @@
 import { storage } from "#imports";
 
 import { createClient } from "@supabase/supabase-js";
-import { env } from "~/lib/env";
+import env from "../../env.config";
 
 const storageAdapter = {
   getItem: async (key: string) =>

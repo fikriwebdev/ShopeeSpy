@@ -1,8 +1,8 @@
-import { createEnv } from "@t3-oss/env-core";
+import { defineEnv } from "envin";
 import { z } from "zod";
-import { NodeEnv } from "~/types";
+import { NodeEnv } from "./src/types";
 
-export const env = createEnv({
+export default defineEnv({
   shared: {
     NODE_ENV: z.nativeEnum(NodeEnv).default(NodeEnv.DEVELOPMENT),
   },
@@ -12,14 +12,13 @@ export const env = createEnv({
     VITE_SUPABASE_URL: z.string().url(),
     VITE_SUPABASE_ANON_KEY: z.string(),
   },
-  runtimeEnv: {
+  env: {
     VITE_SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL,
     VITE_SUPABASE_ANON_KEY: import.meta.env.VITE_SUPABASE_ANON_KEY,
     VITE_OPEN_PANEL_KEY: import.meta.env.VITE_OPEN_PANEL_KEY,
   },
-  skipValidation:
+  skip:
     (!!import.meta.env.SKIP_ENV_VALIDATION &&
       ["1", "true"].includes(import.meta.env.SKIP_ENV_VALIDATION)) ||
     import.meta.env.npm_lifecycle_event === "lint",
-  emptyStringAsUndefined: true,
 });

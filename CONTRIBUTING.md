@@ -15,6 +15,7 @@ In order to create a pull request for Extro, follow the GitHub instructions for 
 Description of the project files and directories.
 
 ```bash
+├── .cursor                       # Cursor rules
 ├── .github/                      # Github related files (workflows, templates)
 ├── .husky/                       # Husky config
 ├── .vscode/                      # VSCode settings (extensions, settings)
@@ -26,13 +27,13 @@ Description of the project files and directories.
 │    ├── lib/                     # Utility functions and third-party libraries
 │    ├── types/                   # TypeScript types
 │    └── typings/                 # Custom type definitions
-├── .cursorrules                  # Cursor rules
 ├── .env.example                  # Examples of env variables
 ├── .gitignore                    # Files ignored by git
 ├── biome.json                    # Biome configuration
 ├── bun.lockb                     # Bun lockfile
 ├── commitlint.config.ts          # Config for CommitLint - to enforce commit consistency
 ├── components.json               # shadcn/ui configuration
+├── env.config.ts                 # Environment variables configuration
 ├── package.json                  # Dependencies and additional informations about the project
 ├── tailwind.config.ts            # Tailwind configuration
 ├── tsconfig.json                 # TypeScript config
