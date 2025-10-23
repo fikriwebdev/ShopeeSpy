@@ -15,9 +15,10 @@ const PROCESSED_MARKER = 'shopeespy-processed';
 // --- "DATABASE" LOKAL (SAMA) ---
 const itemDataMap: Record<string, { ctime: number; sold: number; spd: number }> = {};
 
+// --- FLAG PENCEGAH LOOP (BARU) ---
+let isSorting = false;
+
 // --- DEBOUNCE HELPER (BARU) ---
-// Ini fungsi 'magic' biar 'sortProductsBySPD' gak dipanggil 1000x per detik
-// Dia bakal nunggu 250ms setelah 'keributan' DOM selesai, baru jalan
 let sortTimer: NodeJS.Timeout | null = null;
 function debounce(func: () => void, delay: number) {
   if (sortTimer) {
@@ -25,12 +26,8 @@ function debounce(func: () => void, delay: number) {
   }
   sortTimer = setTimeout(func, delay);
 }
-// --- AKHIR FUNGSI BARU ---
-
 
 // --- FUNGSI UTIL (SAMA, UDAH BENER) ---
-// (getItemIdFromUrl, injectReactComponent)
-
 function getItemIdFromUrl(url: string): string | null {
   try {
     const parts = url.split('?')?.[0]?.split('.') ?? [];
@@ -47,7 +44,6 @@ function getItemIdFromUrl(url: string): string | null {
 }
 
 function injectReactComponent(card: Element, ctime: number, sold: number) {
-  // Cek dulu, jangan sampe dobel inject
   if (card.querySelector('.shopeespy-react-root')) return;
 
   const uploadDate = new Date(ctime * 1000);
@@ -67,15 +63,23 @@ function injectReactComponent(card: Element, ctime: number, sold: number) {
   );
 }
 
-// --- FUNGSI SORTING (SAMA, UDAH BENER) ---
+// --- FUNGSI SORTING (DIUBAH DENGAN FLAG) ---
 function sortProductsBySPD() {
+  // Kalo kita lagi nyortir, jangan panggil lagi
+  if (isSorting) return;
+  // 1. NAIKKAN BENDERA
+  isSorting = true;
+
   const container = document.querySelector(PRODUCT_LIST_CONTAINER_SELECTOR);
-  if (!container || !container.parentNode) return; 
-  
+  if (!container || !container.parentNode) {
+    isSorting = false; // Turunin bendera kalo error
+    return;
+  }
+
   const cards = Array.from(
     container.querySelectorAll(PRODUCT_CARD_SELECTOR)
   ) as HTMLLIElement[];
-  
+
   cards.sort((cardA, cardB) => {
     const linkA = cardA.querySelector('a');
     const itemIdA = linkA ? getItemIdFromUrl(linkA.href) : null;
@@ -92,12 +96,16 @@ function sortProductsBySPD() {
 
   cards.forEach(card => container.appendChild(card));
   console.log(`ShopeeSpy: Produk di-sortir ulang! (Total ${cards.length} card)`);
+
+  // 2. TURUNKAN BENDERA (pake timeout kecil biar aman)
+  // Ini buat ngasih "napas" biar mutasi dari appendChild selesai
+  // sebelum observer-nya diaktifin lagi.
+  setTimeout(() => {
+    isSorting = false;
+  }, 100); // 100ms
 }
 
 // --- FUNGSI "SCAN" (DIUBAH) ---
-// Sekarang namanya 'handleDomUpdate', dia ngerjain 2 hal:
-// 1. Pasang badge ke card baru
-// 2. Manggil sortir (pake debounce)
 function handleDomUpdate() {
   const newCards = document.querySelectorAll(
     `${PRODUCT_CARD_SELECTOR}:not(.${PROCESSED_MARKER})`
@@ -123,13 +131,10 @@ function handleDomUpdate() {
   }
 
   // 2. Panggil Sortir (Pake Debounce)
-  // Ini bakal jalan terus tiap ada mutasi, tapi 'debounce'
-  // bakal nahan eksekusinya sampe DOM-nya "tenang"
   debounce(sortProductsBySPD, 250); // Tunggu 250ms
 }
 
 // --- processApiData (DIUBAH) ---
-// Sekarang TUGASNYA CUMA SATU: MASUKIN DATA KE MAP
 function processApiData(items: any[]) {
   if (!items) return;
   for (const item of items) {
@@ -155,12 +160,9 @@ function processApiData(items: any[]) {
       };
     }
   }
-  // GAK ADA LAGI 'scanForNewCards' atau 'sort' DI SINI
 }
 
 // --- FUNGSI INTERCEPTOR (SAMA PERSIS) ---
-// (Salin-tempel interceptXHR dan interceptFetch lo yang udah bener)
-
 function interceptXHR() {
   const { open: originalOpen, send: originalSend } = XMLHttpRequest.prototype;
   XMLHttpRequest.prototype.open = function (
@@ -176,7 +178,7 @@ function interceptXHR() {
         if (url && url.includes('/api/v4/search/search_items')) {
           try {
             const data = JSON.parse(this.responseText) as ShopeeSearchItemsResponse;
-            if (data.items) processApiData(data.items); // CUMA PANGGIL INI
+            if (data.items) processApiData(data.items);
           } catch (e) {}
         }
       }, false
@@ -202,7 +204,7 @@ function interceptFetch() {
         const clone = response.clone();
         const data = await clone.json() as ShopeeSearchItemsResponse;
         if (data.items && data.items.length) {
-          processApiData(data.items); // CUMA PANGGIL INI
+          processApiData(data.items);
         }
       } catch (e) {}
     }
@@ -233,13 +235,23 @@ export default defineContentScript({
     interceptXHR();
     interceptFetch();
 
-    // 2. Pasang observer (DIUBAH)
+    // 2. Pasang observer (DIUBAH DENGAN FLAG CHECK)
     const initObserver = () => {
-      // Observer ini sekarang manggil 'handleDomUpdate'
-      const domObserver = new MutationObserver(() => handleDomUpdate());
-      
-      // Kita "awasi" container produknya, bukan 'document.body'
-      // biar lebih efisien
+      // Bikin callback-nya dulu
+      const observerCallback = () => {
+        // Kalo mutasinya terjadi KARENA KITA LAGI NYORTIR, abaikan!
+        if (isSorting) {
+          // console.log('ShopeeSpy: Mutasi diabaikan (sedang sortir)');
+          return;
+        }
+        // Kalo aman, baru panggil handleDomUpdate
+        handleDomUpdate();
+      };
+
+      // Observer ini sekarang manggil 'observerCallback'
+      const domObserver = new MutationObserver(observerCallback);
+
+      // Kita "awasi" container produknya
       const productListContainer = document.querySelector(PRODUCT_LIST_CONTAINER_SELECTOR);
       
       if (productListContainer) {
@@ -249,7 +261,8 @@ export default defineContentScript({
         handleDomUpdate();
       } else {
         // Fallback kalo container-nya gak langsung ada
-        const bodyObserver = new MutationObserver(() => handleDomUpdate());
+        // Pake callback yang sama di sini
+        const bodyObserver = new MutationObserver(observerCallback);
         bodyObserver.observe(document.body, { childList: true, subtree: true });
         console.log('ShopeeSpy: Observer aktif di BODY (Fallback).');
       }
