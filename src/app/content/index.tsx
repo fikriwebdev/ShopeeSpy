@@ -3,7 +3,9 @@ import ReactDOM from 'react-dom/client';
 import { defineContentScript } from '#imports';
 import '~/assets/styles/globals.css';
 import DateInjector from '@/components/date-injector';
-import { ShopeeSearchItemsResponse } from '@/types/shopee-search-items-response';
+import { Item, ShopeeSearchItemsResponse } from '@/types/shopee-search-items-response';
+import { ShopeeCategoryProductResponse, Unit } from '@/types/shopee-category-product-response';
+import { ShopeeSearchItemsWithCategoryResponse } from '@/types/shopee-search-items-with-category-response';
 
 console.log('🚀 ShopeeSpy (Observer Sort Edition) Active!');
 
@@ -113,16 +115,18 @@ function handleDomUpdate() {
 
   // 1. Pasang Badge (kalo ada card baru)
   if (newCards.length > 0) {
-    // console.log(`ShopeeSpy: Ditemukan ${newCards.length} card baru. Memasang badge...`);
+    console.log(`ShopeeSpy: Ditemukan ${newCards.length} card baru. Memasang badge...`);
     for (const card of newCards) {
       const link = card.querySelector('a');
       if (!link || !link.href) continue;
       const itemId = getItemIdFromUrl(link.href);
+     
       if (!itemId) {
         card.classList.add(PROCESSED_MARKER);
         continue;
       }
       const itemData = itemDataMap[itemId];
+      console.log(`ShopeeSpy: itemId=${itemId} data=`, itemData);
       if (itemData) {
         card.classList.add(PROCESSED_MARKER);
         injectReactComponent(card, itemData.ctime, itemData.sold);
@@ -134,14 +138,44 @@ function handleDomUpdate() {
   debounce(sortProductsBySPD, 250); // Tunggu 250ms
 }
 
-// --- processApiData (DIUBAH) ---
-function processApiData(items: any[]) {
+// process search api data
+function processSearchApiData(items: Item[]) {
   if (!items) return;
+  console.log("ShopeeSpy: Processing search API data, items =", items);
   for (const item of items) {
     const standardizedItem = {
       id: item?.item_basic?.itemid?.toString(),
       ctime: item?.item_basic?.ctime,
       sold: item?.item_basic?.historical_sold || item?.item_basic?.sold || 0,
+    };
+
+    if (
+      standardizedItem.id &&
+      standardizedItem.ctime &&
+      !itemDataMap[standardizedItem.id]
+    ) {
+      console.log("ShopeeSpy: Standardized Item =", standardizedItem);
+      const uploadDate = new Date(standardizedItem.ctime * 1000);
+      const daysDiff = (new Date().getTime() - uploadDate.getTime()) / (1000 * 60 * 60 * 24);
+      const daysSinceUpload = Math.max(daysDiff, 1);
+      const spd = (standardizedItem.sold / daysSinceUpload);
+      itemDataMap[standardizedItem.id] = {
+        ctime: standardizedItem.ctime,
+        sold: standardizedItem.sold,
+        spd: spd,
+      };
+    }
+  }
+}
+
+// process search category api data
+function processSearchWithCategoryApiData(items: ShopeeSearchItemsWithCategoryResponse['items']) {
+  if (!items) return;
+  for (const item of items) {
+    const standardizedItem = {
+      id: item?.itemid?.toString(),
+      ctime: item?.item_data.ctime,
+      sold: item?.item_data?.item_card_display_sold_count.historical_sold_count || item?.item_data?.item_card_display_sold_count.display_sold_count || 0,
     };
 
     if (
@@ -162,32 +196,34 @@ function processApiData(items: any[]) {
   }
 }
 
-// --- FUNGSI INTERCEPTOR (SAMA PERSIS) ---
-function interceptXHR() {
-  const { open: originalOpen, send: originalSend } = XMLHttpRequest.prototype;
-  XMLHttpRequest.prototype.open = function (
-    method: string, url: string | URL, ...args: any[]
-  ) {
-    (this as any)._shopeespy_url = url.toString();
-    // @ts-ignore
-    return originalOpen.apply(this, [method, url, ...args]);
-  };
-  XMLHttpRequest.prototype.send = function (...args: any[]) {
-    this.addEventListener('load', () => {
-        const url = (this as any)._shopeespy_url;
-        if (url && url.includes('/api/v4/search/search_items')) {
-          try {
-            const data = JSON.parse(this.responseText) as ShopeeSearchItemsResponse;
-            if (data.items) processApiData(data.items);
-          } catch (e) {}
-        }
-      }, false
-    );
-    // @ts-ignore
-    return originalSend.apply(this, args);
-  };
-  console.log('ShopeeSpy: XHR Interceptor loaded.');
+// process category product api data
+function processCategoryProductApiData(items: Unit[]) {
+  if (!items) return;
+  for (const item of items) {
+    const standardizedItem = {
+      id: item?.item.item_data.itemid?.toString(),
+      ctime: item?.item.item_data.ctime,
+      sold: item?.item.item_data?.item_card_display_sold_count.historical_sold_count || item?.item.item_data?.item_card_display_sold_count.display_sold_count || 0,
+    };
+
+    if (
+      standardizedItem.id &&
+      standardizedItem.ctime &&
+      !itemDataMap[standardizedItem.id]
+    ) {
+      const uploadDate = new Date(standardizedItem.ctime * 1000);
+      const daysDiff = (new Date().getTime() - uploadDate.getTime()) / (1000 * 60 * 60 * 24);
+      const daysSinceUpload = Math.max(daysDiff, 1);
+      const spd = (standardizedItem.sold / daysSinceUpload);
+      itemDataMap[standardizedItem.id] = {
+        ctime: standardizedItem.ctime,
+        sold: standardizedItem.sold,
+        spd: spd,
+      };
+    }
+  }
 }
+
 
 function interceptFetch() {
   const { fetch: originalFetch } = window;
@@ -199,12 +235,35 @@ function interceptFetch() {
                   ? urlInput.url 
                   : (urlInput as string | URL).toString();
     const response = await originalFetch.apply(window, args);
+
+    if(url.includes("/api/v4/recommend/recommend_v2")){
+      console.log("ShopeeSpy: Intercepted recommend_v2 fetch");
+       try {
+        const clone = response.clone();
+        const data = await clone.json() as ShopeeCategoryProductResponse;
+        if (data.data.units && data.data.units.length) {
+         processCategoryProductApiData(data.data.units);
+        }
+      } catch (e) {}
+    }
+
     if (url.includes('/api/v4/search/search_items')) {
+    
       try {
         const clone = response.clone();
+       
+
+        const isFromCategory = url.includes("scenario=PAGE_CATEGORY_SEARCH");
+
+        if(isFromCategory){
+            console.log("ShopeeSpy: Intercepted search_items + category fetch");
+           const data = await clone.json() as ShopeeSearchItemsWithCategoryResponse;
+          processSearchWithCategoryApiData(data.items);
+        }
+  console.log("ShopeeSpy: Intercepted search_items fetch");
         const data = await clone.json() as ShopeeSearchItemsResponse;
         if (data.items && data.items.length) {
-          processApiData(data.items);
+          processSearchApiData(data.items);
         }
       } catch (e) {}
     }
@@ -224,6 +283,7 @@ export default defineContentScript({
     'https://shopee.co.id/mall*',
     'https://shopee.co.id/daily*',
     'https://shopee.co.id/universal-link*',
+    'https://shopee.co.id/*-cat.*','https://shopee.co.id/*-cat*',
   ],
   world: 'MAIN',
   runAt: 'document_start',
@@ -232,7 +292,7 @@ export default defineContentScript({
     console.log('ShopeeSpy "main" running (Observer Sort Edition)');
 
     // 1. Pasang interceptor (SAMA)
-    interceptXHR();
+  
     interceptFetch();
 
     // 2. Pasang observer (DIUBAH DENGAN FLAG CHECK)

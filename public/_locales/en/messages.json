@@ -1,11 +1,11 @@
 {
   "extensionDescription": {
     "description": "Description of the extension.",
-    "message": "Open source browser extension starter kit."
+    "message": "Browser Ekstensi untuk menemukan produk potensial di shopee untuk para seller dan affiliate."
   },
   "extensionName": {
     "description": "Name of the extension.",
-    "message": "Extro"
+    "message": "ShopeeSpy"
   },
   "hello": {
     "message": "Hello from"

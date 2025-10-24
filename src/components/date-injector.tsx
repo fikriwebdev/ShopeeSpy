@@ -66,9 +66,9 @@ const DateInjector: React.FC<Props> = ({ uploadDate, soldCount }) => {
   
 
       {/* Bagian Kanan: Info Sales */}
-      <p className="flex-shrink-0">
+      {spd !== '0.0' && <p className="flex-shrink-0">
         🔥 {spd} SPD ({formattedSold} terjual)
-      </p>
+      </p>}
     </div>
   );
 };
